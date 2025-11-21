@@ -43,6 +43,7 @@ var (
 	flagDisableTCP         = flag.Bool("disable-tcp", false, "disable the tcp listener on tsnet/tailscaled")
 	flagFunnel             = flag.Bool("funnel", false, "use Tailscale Funnel to make tsidp available on the public internet")
 	flagHostname           = flag.String("hostname", "idp", "tsnet hostname to use instead of idp")
+	flagServerURL          = flag.String("server-url", "", "server url to use instead of the tailscale FDQN.")
 	flagDir                = flag.String("dir", "", "tsnet state directory; a default one will be created if not provided")
 	flagEnableSTS          = flag.Bool("enable-sts", false, "enable OIDC STS token exchange support")
 
@@ -181,7 +182,11 @@ func main() {
 		*flagEnableSTS,
 	)
 
-	srv.SetServerURL(strings.TrimSuffix(st.Self.DNSName, "."), *flagPort)
+	if *flagServerURL != "" {
+		srv.SetServerURL(*flagServerURL, *flagPort)
+	} else {
+		srv.SetServerURL(strings.TrimSuffix(st.Self.DNSName, "."), *flagPort)
+	}
 
 	// Load funnel clients from disk if they exist, regardless of whether funnel is enabled
 	// This ensures OIDC clients persist across restarts

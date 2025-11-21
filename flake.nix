@@ -153,6 +153,12 @@
                 description = "Disable the TCP Listeners on tsnet and tailscaled";
               };
 
+              serverURL = mkOption {
+                type = nullOr str;
+                default = null;
+                description = "Server URL to use instead of the tailscale FDQN";
+              };
+
               enableFunnel = mkOption {
                 type = bool;
                 default = false;
@@ -240,6 +246,7 @@
                       args = lib.cli.toGNUCommandLineShell { mkOptionName = k: "-${k}"; } {
                         hostname = cfg.settings.hostName;
                         port = cfg.settings.port;
+                        server-url = cfg.settings.serverURL;
                         local-port = cfg.settings.localPort;
                         use-local-tailscaled = cfg.settings.useLocalTailscaled;
                         unix-socket = cfg.settings.unixSocket;

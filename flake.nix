@@ -147,6 +147,12 @@
                 description = "Path to unix socket to listen on";
               };
 
+              disableTCP = mkOption {
+                type = nullOr bool;
+                default = null;
+                description = "Disable the TCP Listeners on tsnet and tailscaled";
+              };
+
               enableFunnel = mkOption {
                 type = bool;
                 default = false;
@@ -237,6 +243,7 @@
                         local-port = cfg.settings.localPort;
                         use-local-tailscaled = cfg.settings.useLocalTailscaled;
                         unix-socket = cfg.settings.unixSocket;
+                        disable-tcp = cfg.settings.disableTCP;
                         funnel = cfg.settings.enableFunnel;
                         enable-sts = cfg.settings.enableSts;
                         log = cfg.settings.logLevel;

@@ -41,6 +41,7 @@ var (
 	flagLocalPort          = flag.Int("local-port", -1, "allow requests from localhost")
 	flagUseLocalTailscaled = flag.Bool("use-local-tailscaled", false, "use local tailscaled instead of tsnet")
 	flagUnixSocket         = flag.String("unix-socket", "", "use a unix socket instead of tcp")
+	flagDisableTCP         = flag.Bool("disable-tcp", false, "disable the tcp listener on tsnet/tailscaled")
 	flagFunnel             = flag.Bool("funnel", false, "use Tailscale Funnel to make tsidp available on the public internet")
 	flagHostname           = flag.String("hostname", "idp", "tsnet hostname to use instead of idp")
 	flagDir                = flag.String("dir", "", "tsnet state directory; a default one will be created if not provided")
@@ -94,38 +95,41 @@ func main() {
 			slog.Error("getting local.Client status", slog.Any("error", err))
 			os.Exit(1)
 		}
-		portStr := fmt.Sprint(*flagPort)
-		anySuccess := false
-		for _, ip := range st.TailscaleIPs {
-			ln, err := net.Listen("tcp", net.JoinHostPort(ip.String(), portStr))
-			if err != nil {
-				slog.Warn("net.Listen failed", slog.String("ip", ip.String()), slog.Any("error", err))
-				continue
-			}
-			anySuccess = true
-			ln = tls.NewListener(ln, &tls.Config{
-				GetCertificate: lc.GetCertificate,
-			})
-			lns = append(lns, ln)
-		}
-		if !anySuccess {
-			slog.Error("failed to listen on any ip", slog.Any("ips", st.TailscaleIPs))
-			os.Exit(1)
-		}
 
-		// tailscaled needs to be setting an HTTP header for funneled requests
-		// that older versions don't provide.
-		// TODO(naman): is this the correct check?
-		if *flagFunnel && !version.AtLeast(st.Version, "1.71.0") {
-			slog.Error("Local tailscaled not new enough to support -funnel. Update Tailscale or use tsnet mode.")
-			os.Exit(1)
+		if !*flagDisableTCP {
+			portStr := fmt.Sprint(*flagPort)
+			anySuccess := false
+			for _, ip := range st.TailscaleIPs {
+				ln, err := net.Listen("tcp", net.JoinHostPort(ip.String(), portStr))
+				if err != nil {
+					slog.Warn("net.Listen failed", slog.String("ip", ip.String()), slog.Any("error", err))
+					continue
+				}
+				anySuccess = true
+				ln = tls.NewListener(ln, &tls.Config{
+					GetCertificate: lc.GetCertificate,
+				})
+				lns = append(lns, ln)
+			}
+			if !anySuccess {
+				slog.Error("failed to listen on any ip", slog.Any("ips", st.TailscaleIPs))
+				os.Exit(1)
+			}
+
+			// tailscaled needs to be setting an HTTP header for funneled requests
+			// that older versions don't provide.
+			// TODO(naman): is this the correct check?
+			if *flagFunnel && !version.AtLeast(st.Version, "1.71.0") {
+				slog.Error("Local tailscaled not new enough to support -funnel. Update Tailscale or use tsnet mode.")
+				os.Exit(1)
+			}
+			cleanup, watcherChan, err = server.ServeOnLocalTailscaled(ctx, lc, st, uint16(*flagPort), *flagFunnel)
+			if err != nil {
+				slog.Error("could not serve on local tailscaled", slog.Any("error", err))
+				os.Exit(1)
+			}
+			defer cleanup()
 		}
-		cleanup, watcherChan, err = server.ServeOnLocalTailscaled(ctx, lc, st, uint16(*flagPort), *flagFunnel)
-		if err != nil {
-			slog.Error("could not serve on local tailscaled", slog.Any("error", err))
-			os.Exit(1)
-		}
-		defer cleanup()
 	} else {
 		hostinfo.SetApp("tsidp")
 		ts := &tsnet.Server{
@@ -149,23 +153,26 @@ func main() {
 			slog.Error("failed to get local client", slog.Any("error", err))
 			os.Exit(1)
 		}
-		var ln net.Listener
-		if *flagFunnel {
-			if err := ipn.CheckFunnelAccess(uint16(*flagPort), st.Self); err != nil {
-				slog.Error("funnel access denied", slog.Any("error", err))
+
+		if !*flagDisableTCP {
+			var ln net.Listener
+			if *flagFunnel {
+				if err := ipn.CheckFunnelAccess(uint16(*flagPort), st.Self); err != nil {
+					slog.Error("funnel access denied", slog.Any("error", err))
+					os.Exit(1)
+				}
+				ln, err = ts.ListenFunnel("tcp", fmt.Sprintf(":%d", *flagPort))
+			} else {
+				ln, err = ts.ListenTLS("tcp", fmt.Sprintf(":%d", *flagPort))
+			}
+
+			if err != nil {
+				slog.Error("failed to listen", slog.Any("error", err))
 				os.Exit(1)
 			}
-			ln, err = ts.ListenFunnel("tcp", fmt.Sprintf(":%d", *flagPort))
-		} else {
-			ln, err = ts.ListenTLS("tcp", fmt.Sprintf(":%d", *flagPort))
-		}
 
-		if err != nil {
-			slog.Error("failed to listen", slog.Any("error", err))
-			os.Exit(1)
+			lns = append(lns, ln)
 		}
-
-		lns = append(lns, ln)
 	}
 
 	srv := server.New(

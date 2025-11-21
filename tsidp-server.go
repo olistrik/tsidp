@@ -39,6 +39,7 @@ var (
 	flagPort               = flag.Int("port", 443, "port to listen on")
 	flagLocalPort          = flag.Int("local-port", -1, "allow requests from localhost")
 	flagUseLocalTailscaled = flag.Bool("use-local-tailscaled", false, "use local tailscaled instead of tsnet")
+	flagUnixSocket         = flag.String("unix-socket", "", "unix socket to listen on")
 	flagFunnel             = flag.Bool("funnel", false, "use Tailscale Funnel to make tsidp available on the public internet")
 	flagHostname           = flag.String("hostname", "idp", "tsnet hostname to use instead of idp")
 	flagDir                = flag.String("dir", "", "tsnet state directory; a default one will be created if not provided")
@@ -183,6 +184,34 @@ func main() {
 	}
 
 	slog.Info("tsidp server started", slog.String("server_url", srv.ServerURL()))
+
+	if *flagUnixSocket != "" {
+		socketPath := *flagUnixSocket
+		info, err := os.Stat(socketPath)
+		if err == nil && (info.Mode()&os.ModeSocket) != 0 {
+			// A socket file already exists.
+			c, err := net.Dial("unix", socketPath)
+			if err == nil {
+				c.Close()
+				slog.Error("unix socket already in use")
+				os.Exit(1)
+			}
+
+			// It's a stale socket, so we can remove it.
+			os.Remove(socketPath)
+		}
+
+		ln, err := net.Listen("unix", *flagUnixSocket)
+		if err != nil {
+			slog.Error("failed to listen on unix socket", slog.Any("error", err))
+			os.Exit(1)
+		}
+		defer func() {
+			ln.Close() // TODO: the other listeners are not closed?
+			os.Remove(*flagUnixSocket)
+		}()
+		lns = append(lns, ln)
+	}
 
 	if *flagLocalPort != -1 {
 		loopbackURL := fmt.Sprintf("http://localhost:%d", *flagLocalPort)

@@ -141,6 +141,12 @@
                 default = false;
               };
 
+              unixSocket = mkOption {
+                type = nullOr lib.types.path;
+                default = null;
+                description = "Path to unix socket to listen on";
+              };
+
               enableFunnel = mkOption {
                 type = bool;
                 default = false;
@@ -230,6 +236,7 @@
                         port = cfg.settings.port;
                         local-port = cfg.settings.localPort;
                         use-local-tailscaled = cfg.settings.useLocalTailscaled;
+                        unix-socket = cfg.settings.unixSocket;
                         funnel = cfg.settings.enableFunnel;
                         enable-sts = cfg.settings.enableSts;
                         log = cfg.settings.logLevel;

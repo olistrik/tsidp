@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
@@ -197,7 +198,21 @@ func main() {
 
 	slog.Info("tsidp server started", slog.String("server_url", srv.ServerURL()))
 
-	if *flagUnixSocket != "" {
+	if fdStr := os.Getenv("LISTEN_FDS"); fdStr != "" {
+		fds, err := strconv.Atoi(fdStr)
+		if err != nil {
+			slog.Error("failed to listen on systemd socket", slog.Any("error", err))
+		}
+		// systemd socket activation starts at fd 3
+		for fd := 3; fd < 3+fds; fd++ {
+			file := os.NewFile(uintptr(fd), "systemd-socket")
+			ln, err := net.FileListener(file)
+			if err != nil {
+				slog.Error("failed to listen on systemd socket", slog.Any("error", err))
+			}
+			lns = append(lns, ln)
+		}
+	} else if *flagUnixSocket != "" {
 		socketPath := *flagUnixSocket
 		info, err := os.Stat(socketPath)
 		if err == nil && (info.Mode()&os.ModeSocket) != 0 {
